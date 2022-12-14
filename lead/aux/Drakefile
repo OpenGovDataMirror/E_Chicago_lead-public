@@ -1,0 +1,56 @@
+$[SQL_DIR]/aux/schema <- [method:psql_schema -timecheck]
+
+; summarize assessor and buildings data per address (sources have multiple entries per address over time)
+$[SQL_DIR]/aux/assessor <- aux/assessor.sql, $[SQL_DIR]/input/assessor [method:psql]
+
+; match stellar.addr with aux.addresses
+$[SQL_DIR]/aux/stellar_addresses <- aux/stellar_addresses.sql, $[SQL_DIR]/stellar/addr, $[SQL_DIR]/aux/addresses [method:psql]
+
+; collect complete tests (not missing name, dob, or test date)
+$[SQL_DIR]/aux/tests <- aux/tests.sql, $[SQL_DIR]/input/currbllshort, $[SQL_DIR]/input/m7, $[SQL_DIR]/aux/schema [method:psql]
+
+; auxillary information about tests: test number, first and last test, first ebll, maximum bll
+; also importantly drops tests with invalid dates (null kid date of birth or sample date < date of birth)
+$[SQL_DIR]/aux/kid_tests_info <- aux/kid_tests_info.sql, $[SQL_DIR]/aux/kid_tests, $[SQL_DIR]/aux/kids, $[SQL_DIR]/aux/test_addresses, $[SQL_DIR]/aux/blls [method:psql]
+
+; generate canonical list of kids by taking mode of deduped kid clusters
+$[SQL_DIR]/aux/kids <- aux/kids.sql, $[SQL_DIR]/dedupe/infants, $[SQL_DIR]/dedupe/entity_map, $[SQL_DIR]/aux/schema [method:psql]
+
+; initialize address table with Chicago addresses and geocoded addresses from currbllshort and buildings datasets
+$[SQL_DIR]/aux/addresses <- aux/addresses.sql, $[SQL_DIR]/buildings/addresses, $[SQL_DIR]/input/census_tracts, $[SQL_DIR]/input/wards, $[SQL_DIR]/input/currbllshort, $[SQL_DIR]/input/m7, $[SQL_DIR]/cornerstone/addresses, $[SQL_DIR]/aux/schema [method:psql]
+
+; match tests to addresses
+$[SQL_DIR]/aux/test_addresses <- aux/test_addresses.sql, $[SQL_DIR]/aux/tests, $[SQL_DIR]/aux/addresses [method:psql]
+
+$[SQL_DIR]/aux/kid_mothers <- aux/kid_mothers.sql, $[SQL_DIR]/aux/kids, $[SQL_DIR]/aux/kid_wics [method:psql]
+
+$[SQL_DIR]/aux/kid_wic_addresses <- aux/kid_wic_addresses.sql, $[SQL_DIR]/aux/kid_wics, $[SQL_DIR]/aux/kid_mothers, $[SQL_DIR]/cornerstone/addresses, $[SQL_DIR]/aux/kids, $[SQL_DIR]/aux/addresses [method:psql]
+
+; generate a mapping of addresses to buildings and complexes
+$[SQL_DIR]/aux/complex_addresses <- aux/complex_addresses.sql, $[SQL_DIR]/buildings/complex_buildings, $[SQL_DIR]/buildings/building_addresses, $[SQL_DIR]/buildings/addresses, $[SQL_DIR]/aux/addresses [method:psql]
+
+; building level aggregation of footprint data
+$[SQL_DIR]/aux/buildings <- aux/buildings.py, $[SQL_DIR]/input/buildings, $[SQL_DIR]/buildings/building_components, $[SQL_DIR]/aux/schema
+    python $INPUT && touch $OUTPUT
+
+; binarize building permit type
+$[SQL_DIR]/aux/building_permits <- aux/building_permits.py, $[SQL_DIR]/input/building_permits, $[SQL_DIR]/aux/schema
+    python $INPUT && touch $OUTPUT
+
+$[SQL_DIR]/aux/kid_stellar_addresses <- aux/kid_stellar_addresses.sql, $[SQL_DIR]/aux/kid_stellars, $[SQL_DIR]/stellar/ca_link, $[SQL_DIR]/stellar/addr, $[SQL_DIR]/aux/addresses [method:psql]
+
+$[SQL_DIR]/aux/kid_wic_min_date <- aux/kid_wic_min_date.sql, $[SQL_DIR]/aux/kid_wics, $[SQL_DIR]/aux/kids, $[SQL_DIR]/cornerstone/partenrl [method:psql]
+
+; link between currbllshort and stellar tests
+$[SQL_DIR]/aux/labs_tests <- aux/labs_tests.sql, $[SQL_DIR]/stellar/lab, $[SQL_DIR]/aux/tests, $[SQL_DIR]/aux/kid_tests, $[SQL_DIR]/aux/kid_stellars [method:psql]
+
+; estimate monthly limit of detection for each lab
+$[SQL_DIR]/aux/lab_months <- aux/lab_months.sql, $[SQL_DIR]/aux/tests, $[SQL_DIR]/aux/test_lab [method:psql]
+
+$[SQL_DIR]/aux/bll_months <- aux/bll_months.sql, $[SQL_DIR]/aux/lab_months, $[SQL_DIR]/aux/tests [method:psql]
+
+; imputed blls for each test in aux.tests
+$[SQL_DIR]/aux/blls <- aux/blls.sql, $[SQL_DIR]/aux/tests, $[SQL_DIR]/aux/lab_months, $[SQL_DIR]/aux/bll_months [method:psql]
+
+; cleanup test lab_ids
+$[SQL_DIR]/aux/test_lab <- aux/test_lab.sql, $[SQL_DIR]/aux/tests, $[SQL_DIR]/input/labs [method:psql]
